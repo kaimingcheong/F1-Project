@@ -1,10 +1,10 @@
 import fastf1
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Enable cache
 fastf1.Cache.enable_cache('cache')
 
-#Extracting session data
 def extract_session_data(session):
     session_data = []
 
@@ -35,7 +35,6 @@ def extract_session_data(session):
 
     return pd.DataFrame(session_data)
 
-#Extract weekend data
 def extract_race_weekend_data(year, grand_prix):
     sessions = ['FP1', 'FP2', 'FP3', 'Q', 'R']
     weekend_data = []
@@ -66,30 +65,44 @@ def extract_race_weekend_data(year, grand_prix):
 
     return all_session_data, metadata_df
 
-#Extracting year range
 def extract_data_for_range(start_year, end_year):
     all_data = []
     metadata_list = []
 
-    for year in range(start_year, end_year + 1):
-        schedule = fastf1.get_event_schedule(year)
+    def worker(year, gp):
+        try:
+            return extract_race_weekend_data(year, gp)
+        except Exception as e:
+            print(f"Error with {year} {gp}: {e}")
+            return pd.DataFrame(), []
 
-        for gp in schedule['EventName']:
+    schedule = []
+    for year in range(start_year, end_year + 1):
+        events = fastf1.get_event_schedule(year)
+        for gp in events['EventName']:
+            schedule.append((year, gp))
+
+    with ThreadPoolExecutor(max_workers=4) as executor:  
+        future_to_event = {executor.submit(worker, year, gp): (year, gp) for year, gp in schedule}
+        for future in as_completed(future_to_event):
+            year, gp = future_to_event[future]
             try:
-                df, metadata = extract_race_weekend_data(year, gp)
+                df, metadata = future.result()
                 all_data.append(df)
                 metadata_list.append(metadata)
                 print(f"Data extracted for {year} {gp}")
             except Exception as e:
-                print(f"Error with {year} {gp}: {e}")
+                print(f"Error processing {year} {gp}: {e}")
 
     all_race_data = pd.concat(all_data, ignore_index=True)
     metadata_df = pd.DataFrame(metadata_list)
 
     return all_race_data, metadata_df
 
+
 race_data_range, metadata = extract_data_for_range(2018, 2023)
 
 # Save race data and metadata to CSV files
 race_data_range.to_csv('f1_race_data_2018_2023.csv', index=False)
 metadata.to_csv('f1_race_metadata_2018_2023.csv', index=False)
+
