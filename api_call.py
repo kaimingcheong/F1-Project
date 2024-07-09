@@ -5,36 +5,39 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Enable cache
 fastf1.Cache.enable_cache('cache')
 
+# Extracting session data
 def extract_session_data(session):
     session_data = []
 
-    for lap in session.laps.iterlaps():
+    for index, lap in session.laps.iterlaps():
         session_data.append({
             'Year': session.date.year,
             'Grand Prix': session.event['EventName'],
-            'Session': session.session_name,
-            'Driver': lap.Driver,
-            'Start Position': lap['Position'],
-            'Finish Position': lap['Position'],
-            'Final Grid': lap['GridPosition'],
+            'Session': session.name,  # Correct attribute for session name
+            'Driver': lap['Driver'],
+            'Driver Number': lap['DriverNumber'] if 'DriverNumber' in lap else pd.NA,
+            'Start Position': lap['Position'] if 'Position' in lap else pd.NA,
+            'Finish Position': lap['Position'] if 'Position' in lap else pd.NA,
+            'Final Grid': lap.get('GridPosition', pd.NA),
             'Lap Number': lap['LapNumber'],
             'Lap Time': lap['LapTime'],
             'Sector 1 Time': lap['Sector1Time'],
             'Sector 2 Time': lap['Sector2Time'],
             'Sector 3 Time': lap['Sector3Time'],
-            'Pit Stop Count': len(lap['PitInLap']),
-            'Pit Stop Duration': lap['PitStopTime'],
+            'Pit Stop Count': len(lap['PitInLap']) if 'PitInLap' in lap else 0,
+            'Pit Stop Duration': lap.get('PitStopTime', pd.NaT),
             'Tyre Compound': lap['Compound'],
             'Track Temperature': session.weather_data['TrackTemp'].mean(),
             'Air Temperature': session.weather_data['AirTemp'].mean(),
-            'Weather Changes': session.weather_data['Weather'].unique(),
-            'Track Layout': session.track_layout,
-            'Track Length': session.track_length,
-            'Configuration': session.configuration
+            'Weather Changes': ", ".join(session.weather_data['Weather'].unique()) if 'Weather' in session.weather_data else pd.NA,
+            'Track Layout': getattr(session, 'track_layout', pd.NA),
+            'Track Length': getattr(session, 'track_length', pd.NA),
+            'Configuration': getattr(session, 'configuration', pd.NA)
         })
 
     return pd.DataFrame(session_data)
 
+# Extract weekend data
 def extract_race_weekend_data(year, grand_prix):
     sessions = ['FP1', 'FP2', 'FP3', 'Q', 'R']
     weekend_data = []
@@ -52,7 +55,7 @@ def extract_race_weekend_data(year, grand_prix):
                 'Grand Prix': grand_prix,
                 'Session': session_name,
                 'Number of Laps': len(session.laps),
-                'Weather Summary': session.weather_data['Weather'].unique()
+                'Weather Summary': ", ".join(session.weather_data['Weather'].unique()) if 'Weather' in session.weather_data else pd.NA
             })
 
             print(f"Data extracted for {year} {grand_prix} {session_name}")
@@ -60,8 +63,15 @@ def extract_race_weekend_data(year, grand_prix):
         except Exception as e:
             print(f"Error with {year} {grand_prix} {session_name}: {e}")
 
-    all_session_data = pd.concat(weekend_data, ignore_index=True)
-    metadata_df = pd.DataFrame(metadata)
+    if weekend_data:
+        all_session_data = pd.concat(weekend_data, ignore_index=True)
+    else:
+        all_session_data = pd.DataFrame()
+
+    if metadata:
+        metadata_df = pd.DataFrame(metadata)
+    else:
+        metadata_df = pd.DataFrame()
 
     return all_session_data, metadata_df
 
@@ -82,7 +92,7 @@ def extract_data_for_range(start_year, end_year):
         for gp in events['EventName']:
             schedule.append((year, gp))
 
-    with ThreadPoolExecutor(max_workers=4) as executor:  
+    with ThreadPoolExecutor(max_workers=4) as executor:
         future_to_event = {executor.submit(worker, year, gp): (year, gp) for year, gp in schedule}
         for future in as_completed(future_to_event):
             year, gp = future_to_event[future]
@@ -95,14 +105,13 @@ def extract_data_for_range(start_year, end_year):
                 print(f"Error processing {year} {gp}: {e}")
 
     all_race_data = pd.concat(all_data, ignore_index=True)
-    metadata_df = pd.DataFrame(metadata_list)
+    metadata_df = pd.concat(metadata_list, ignore_index=True)
 
     return all_race_data, metadata_df
 
-
-race_data_range, metadata = extract_data_for_range(2018, 2023)
+#Extract data across a range of years
+race_data_range, metadata = extract_data_for_range(2023, 2023)
 
 # Save race data and metadata to CSV files
-race_data_range.to_csv('f1_race_data_2018_2023.csv', index=False)
-metadata.to_csv('f1_race_metadata_2018_2023.csv', index=False)
-
+race_data_range.to_csv('f1_race_data_2023.csv', index=False)
+metadata.to_csv('f1_race_metadata_2023.csv', index=False)
